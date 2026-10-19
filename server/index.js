@@ -1,0 +1,7 @@
+import express from 'express'; import {createServer} from 'node:http'; import {Server} from 'socket.io';
+const app=express(), http=createServer(app), io=new Server(http,{cors:{origin:'*'}}); const queue=[]; const peers=new Map();
+app.get('/health',(_,res)=>res.json({ok:true,queue:queue.length})); app.use(express.static('dist'));
+function remove(id){const i=queue.indexOf(id); if(i>-1) queue.splice(i,1);}
+function match(){while(queue.length>1){const a=queue.shift(),b=queue.shift(); const room=`room-${a}-${b}-${Date.now()}`; peers.set(a,{room,other:b}); peers.set(b,{room,other:a}); io.to(a).emit('matched',{room,initiator:true}); io.to(b).emit('matched',{room,initiator:false});}}
+io.on('connection',s=>{s.on('join',()=>{remove(s.id); queue.push(s.id); s.emit('waiting'); match()}); s.on('signal',({to,data})=>io.to(to).emit('signal',{from:s.id,data})); s.on('chat',({room,text})=>{if(typeof text!=='string'||!text.trim()||text.length>500)return; s.to(room).emit('chat',{text:text.trim()})}); s.on('report',()=>s.emit('report-saved')); s.on('next',()=>{const p=peers.get(s.id); if(p){io.to(p.other).emit('peer-left'); peers.delete(p.other)} peers.delete(s.id); remove(s.id); queue.push(s.id); s.emit('waiting'); match()}); s.on('disconnect',()=>{const p=peers.get(s.id); if(p){io.to(p.other).emit('peer-left'); peers.delete(p.other)} peers.delete(s.id); remove(s.id)});});
+http.listen(3001,()=>console.log('Aymina-Talk server on http://localhost:3001'));
